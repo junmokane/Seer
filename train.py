@@ -48,7 +48,7 @@ def main(args):
     random_seed(args.seed)
     ptbs = args.world_size * args.batch_size * args.gradient_accumulation_steps
     print("training batch size:", ptbs)
-    args.run_name = args.run_name.replace("Seer", f"Seer_ptbs{ptbs}_{args.transformer_layers}layers_{args.transformer_heads}heads_hd{args.hidden_dim}")
+    args.run_name = args.run_name.replace("Seer", f"Seer_ptbs{ptbs}_l{args.transformer_layers}_h{args.transformer_heads}_d{args.hidden_dim}_obs{args.obs_pred}_img{args.loss_image}")
     print("run_name:", args.run_name)
     model = SeerAgent(
         finetune_type=args.finetune_type,

@@ -31,16 +31,19 @@ from utils.data_utils import preprocess_image, preprocess_text_calvin
 import functools
 from utils.train_utils import get_cast_dtype
 import cv2
-
+from analyze_calvin_dataset import make_gif_eval
 
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 logger = logging.getLogger(__name__)
 
 EP_LEN = 360
-NUM_SEQUENCES = 1000
+# NUM_SEQUENCES = 1000
+NUM_SEQUENCES = 4
+VIS_LOGS = False  # use True only when NUM_SEQUENCES is small and node_num is 1 since we make videos for this
 
 def make_env(dataset_path):
     val_folder = Path(dataset_path) / "validation"
+    # print(val_folder)
     env = get_env(val_folder, show_gui=False)
 
     return env
@@ -170,6 +173,7 @@ def evaluate_policy_ddp(model, env, epoch, calvin_conf_path, eval_log_dir=None, 
     assert NUM_SEQUENCES % device_num == 0
     interval_len = int(NUM_SEQUENCES // device_num)
     eval_sequences = eval_sequences[device_id*interval_len:min((device_id+1)*interval_len, NUM_SEQUENCES)]
+    
     results = []
     plans = defaultdict(list)
     local_sequence_i = 0
@@ -178,8 +182,9 @@ def evaluate_policy_ddp(model, env, epoch, calvin_conf_path, eval_log_dir=None, 
     if not debug:
         eval_sequences = tqdm(eval_sequences, position=0, leave=True)
 
-    for initial_state, eval_sequence in eval_sequences:
-        result = evaluate_sequence(env, model, task_oracle, initial_state, eval_sequence, val_annotations, plans, debug, eval_log_dir, base_sequence_i+local_sequence_i, reset=reset, diverse_inst=diverse_inst)
+    for i, (initial_state, eval_sequence) in enumerate(eval_sequences):
+        # print(initial_state, eval_sequence)
+        result = evaluate_sequence(env, model, task_oracle, initial_state, eval_sequence, val_annotations, plans, debug, eval_log_dir, base_sequence_i+local_sequence_i, reset=reset, diverse_inst=diverse_inst, ep_num=i)
         results.append(result)
         eval_sequences.set_description(
             " ".join([f"{i + 1}/5 : {v * 100:.1f}% |" for i, v in enumerate(count_success(results))]) + "|"
@@ -211,7 +216,7 @@ def evaluate_policy_ddp(model, env, epoch, calvin_conf_path, eval_log_dir=None, 
 
     return results
 
-def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence, val_annotations, plans, debug, eval_log_dir='', sequence_i=-1, reset=False, diverse_inst=False):
+def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence, val_annotations, plans, debug, eval_log_dir='', sequence_i=-1, reset=False, diverse_inst=False, ep_num=-1):
     """
     Evaluates a sequence of language instructions.
     """
@@ -219,21 +224,41 @@ def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence, va
     env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
     success_counter = 0
 
+    all_vis_logs = []
+
+    if VIS_LOGS:
+        print(f"\n{ep_num}th episode")
     for subtask_i, subtask in enumerate(eval_sequence):
         if reset:
-            success = rollout(env, model, task_checker, subtask, val_annotations, plans, debug, eval_log_dir, subtask_i, sequence_i, diverse_inst=diverse_inst, robot_obs=robot_obs, scene_obs=scene_obs)
+            success, vis_logs = rollout(env, model, task_checker, subtask, val_annotations, plans, debug, eval_log_dir, subtask_i, sequence_i, diverse_inst=diverse_inst, robot_obs=robot_obs, scene_obs=scene_obs)
         else:
-            success = rollout(env, model, task_checker, subtask, val_annotations, plans, debug, eval_log_dir, subtask_i, sequence_i, diverse_inst=diverse_inst)
+            success, vis_logs = rollout(env, model, task_checker, subtask, val_annotations, plans, debug, eval_log_dir, subtask_i, sequence_i, diverse_inst=diverse_inst)
+        
+        if vis_logs is not None:
+            print(vis_logs[0].shape, vis_logs[1].shape, vis_logs[2])
+        
+        if VIS_LOGS:
+            all_vis_logs.append(vis_logs)
+        
         if success:
             success_counter += 1
         else:
+            # since failed the episode ends and save the video
+            if VIS_LOGS:
+                print(f'saving {ep_num}th episode')
+                make_gif_eval(all_vis_logs, f'{eval_log_dir}/{ep_num}.gif')
             return success_counter
+    
+    if VIS_LOGS:
+        print(f'saving {ep_num}th episode')
+        make_gif_eval(all_vis_logs, f'{eval_log_dir}/{ep_num}.gif')
     return success_counter
 
 def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eval_log_dir='', subtask_i=-1, sequence_i=-1, robot_obs=None, scene_obs=None, diverse_inst=False):
     """
     Run the actual rollout on one subtask (which is one natural language instruction).
     """
+    vis_logs = None
     planned_actions = []
     if robot_obs is not None and scene_obs is not None:
         env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
@@ -249,6 +274,10 @@ def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eva
     model.reset()
     start_info = env.get_info()
 
+    if VIS_LOGS:
+        rgb_statics = [obs["rgb_obs"]['rgb_static']]
+        rgb_grippers = [obs["rgb_obs"]['rgb_gripper']]
+
     for step in range(EP_LEN):
         action = model.step(obs, lang_annotation, step)
         if len(planned_actions) == 0:
@@ -258,14 +287,25 @@ def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eva
                 planned_actions.extend([action[i] for i in range(action.shape[0])])
         action = planned_actions.pop(0)
         obs, _, _, current_info = env.step(action)
+        if VIS_LOGS:
+            rgb_statics.append(obs["rgb_obs"]['rgb_static'])
+            rgb_grippers.append(obs["rgb_obs"]['rgb_gripper'])
         if step == 0:
             collect_plan(model, plans, subtask)
         # check if current step solves a task
         current_task_info = task_oracle.get_task_info_for_set(start_info, current_info, {subtask})
         if len(current_task_info) > 0:
-            return True
+            if VIS_LOGS:
+                rgb_statics = np.stack(rgb_statics)
+                rgb_grippers = np.stack(rgb_grippers)
+                vis_logs = (rgb_statics, rgb_grippers, lang_annotation)
+            return True, vis_logs
 
-    return False
+    if VIS_LOGS:
+        rgb_statics = np.stack(rgb_statics)
+        rgb_grippers = np.stack(rgb_grippers)
+        vis_logs = (rgb_statics, rgb_grippers, lang_annotation)
+    return False, vis_logs
 
 import pdb
 

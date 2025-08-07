@@ -12,6 +12,7 @@ conda activate seer
 git clone --recurse-submodules https://github.com/mees/calvin.git
 export CALVIN_ROOT=$(pwd)/calvin
 cd $CALVIN_ROOT
+pip install "setuptools<58.0.0"
 sh install.sh
 ```
 

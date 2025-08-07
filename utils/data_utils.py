@@ -533,6 +533,8 @@ class BaseCalvinDataset(Dataset):
         Returns:
             Loaded sequence.
         """
+        # print(idx, self.max_window_size, self.min_window_size)
+
         if isinstance(idx, int):
             # When max_ws_size and min_ws_size are equal, avoid unnecessary padding
             # acts like Constant dataset. Currently, used for language data
@@ -893,11 +895,13 @@ class DiskCalvinDataset(BaseCalvinDataset):
         keys = list(chain(*self.observation_space.values()))
         keys.remove("language")
         keys.append("scene_obs")
+
         episodes = [
             self.load_file(self._get_episode_name(file_idx))
             for file_idx in range(start_idx, end_idx)
         ]
         episode = {key: np.stack([ep[key] for ep in episodes]) for key in keys}
+
         if self.with_lang:
             episode["language"] = self.lang_ann[self.lang_lookup[idx]]
             if self.text_aug:
@@ -930,6 +934,7 @@ class DiskCalvinDataset(BaseCalvinDataset):
                 lang_data_bytes = self.client.get(abs_datasets_dir+f"/{self.lang_folder}/auto_lang_ann.npy", enable_cache=True)
                 lang_data = io.BytesIO(lang_data_bytes)
                 lang_data = np.load(lang_data, allow_pickle=True).item()
+
             else:
                 print(
                 "trying to load lang data from: ",
@@ -957,6 +962,7 @@ class DiskCalvinDataset(BaseCalvinDataset):
                     abs_datasets_dir / "auto_lang_ann.npy", allow_pickle=True
                 ).item()
 
+        # print(lang_data)        
         ep_start_end_ids = lang_data["info"]["indx"]  # each of them are 64
         lang_ann = lang_data["language"]["ann"]  # length total number of annotations
         lang_task = lang_data["language"]["task"]
@@ -979,6 +985,10 @@ class DiskCalvinDataset(BaseCalvinDataset):
                     lang_lookup.append(i)
                     episode_lookup.append(idx)
                 cnt += 1
+
+        # print(lang_lookup)
+        # print(episode_lookup)
+        # print(len(lang_lookup))
 
         return np.array(episode_lookup), lang_lookup, lang_ann, lang_task
 
@@ -1141,7 +1151,7 @@ def get_calvin_dataset(args, image_processor, tokenizer, epoch=0, floor=False, e
     num_worker_batches = round_fn(num_batches / num_workers)  #
     num_batches = num_worker_batches * num_workers
     num_samples = num_batches * global_batch_size
-
+    
     sampler = DistributedSampler(
         calvin_dataset,
         num_replicas=args.world_size,

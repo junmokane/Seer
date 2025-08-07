@@ -13,6 +13,7 @@ from utils.distributed_utils import init_distributed_device, world_info_from_env
 from utils.eval_utils_calvin import eval_one_epoch_calvin_ddp
 from utils.arguments_utils import get_parser
 
+# EGL_PLATFORM=surfaceless bash ./scripts/CALVIN_ABC_D/Seer/eval.sh
 
 def random_seed(seed=42, rank=0):
     torch.manual_seed(seed + rank)
@@ -54,7 +55,7 @@ def main():
         phase=args.phase,
         gripper_width=args.gripper_width,
     )
-    calvin_dataset = get_calvin_dataset(args, model.image_processor, clip, epoch=0)
+    # calvin_dataset = get_calvin_dataset(args, model.image_processor, clip, epoch=0)
     random_seed(args.seed, args.rank)
     print(f"Start running training on rank {args.rank}.")
     if args.rank == 0 and args.report_to_wandb:
