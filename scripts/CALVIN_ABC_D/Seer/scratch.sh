@@ -17,7 +17,7 @@ node_num=4
 #     --workers 8 \
 #     --lr_scheduler cosine \
 #     --save_every_iter 100000 \
-#     --num_epochs 1 \
+#     --num_epochs 20 \
 #     --seed 42 \
 #     --batch_size 32 \
 #     --precision fp32 \
@@ -51,9 +51,9 @@ torchrun --nnodes=${node} --nproc_per_node=${node_num} --master_port=10211 train
     --workers 8 \
     --lr_scheduler cosine \
     --save_every_iter 100000 \
-    --num_epochs 1 \
+    --num_epochs 20 \
     --seed 42 \
-    --batch_size 32 \
+    --batch_size 64 \
     --precision fp32 \
     --learning_rate 1e-3 \
     --finetune_type "calvin" \
